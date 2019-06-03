@@ -1,0 +1,199 @@
+---
+title: "Prediction of ER+ breast cancer using gradient descent logistic regression"
+output: html_document
+---
+#### By Georgina Gonzalez. May 30th, 2019
+
+### Introduction
+
+Copy Number Aberrations, gains and losses of genomic regions, are a hallmark of cancer. Copy number data is high-dimensional and is characterized by heavy correlated features. Often, like in this case, the number of samples is small compared to the number of features. In this work I first reduce the dimensionality using Topological Analysis of array CGH (TAaCGH) [1] detecting regions of the genome with significant aberrations in copy number for patients with over-expression in estrogen receptor (ER+). Next it is determined if each of the patients is aberrant for those particular regions creating, as a result, a set of binary variables that will be used as features in a logistic regression model to predict ER+ breast cancer [2].
+
+This is a companion text to the scripts that produce the gradient descent logistic regression model for ER+.
+
+### References
+
+[1] Daniel DeWoskin, Joan Climent, I Cruz-White, Mariel Vazquez, Catherine Park, and Javier Arsuaga. Applications of computational homology to the analysis of treatment response in breast cancer patients. Topology and its Applications, 157(1):157–164, 2010.
+
+[2] Gonzalez G, Ushakova A, Sazdanovic R, Arsuaga J. Prediction in cancer genomics using topological signatures and machine learning. The Abel Symposium “Topological Data Analysis” 2018At: Geiranger, NorwayVolume: (in Press).
+
+Climent data set: Joan Climent, Peter Dimitrow, Jane Fridlyand, Jose Palacios, Reiner Siebert, Donna G Al- bertson, Joe W Gray, Daniel Pinkel, Ana Lluch, and Jose A Martinez-Climent. Deletion of chromosome 11q predicts response to anthracycline-based chemotherapy in early breast cancer. Cancer research, 67(2):818–826, 2007.
+
+Horlings data set: Hugo M Horlings, Carmen Lai, Dimitry SA Nuyten, Hans Halfwerk, Petra Kristel, Erik van Beers, Simon A Joosse, Christiaan Klijn, Petra M Nederlof, Marcel JT Reinders, et al. In- tegration of dna copy number alterations and prognostic gene expression signatures in breast cancer patients. Clinical Cancer Research, 16(2):651–663, 2010.
+
+### The scripts
+- sigmoid.R  - sigmoid function
+- cost_reg_logit.R  - cost function for logistic regression
+- predict.R   - prediction function
+- score.R   - score for logistic regression: F1 or Accuracy
+- grad_reg_logit.R   - gradient descent for one lambda
+- grad_reg_logit_optim_iterLambda.R   - gradient descent for a vector of lambdas
+- curveLambdaVSscore.R   - plot score (F1 or Accuracy) for every lambda
+- plot_thetaVSlambda.R   - plot coefficients vs lambda
+- learningCurve.R   - plot learning curve for the final model
+
+### Training data set: Horlings
+
+The training data set is Horlings and consists of 66 samples. After applying TAaCGH to the ER+ phenotype, only 10 regions resulted significant and a binary variable was created for each of them where 1 means that the aberration is present in the sample. Features do not have any missing values but the response variable ER+ does. These are the frequencies after removing missing values
+
+#### Response variable: Over-expression of estrogen receptor (ER+)
+
+```{r include = FALSE}
+# libraries
+library(yaml)
+library(expss)
+library(dplyr)
+
+# Reading the parameters from the yaml file
+params <- read_yaml("~/Desktop/Gina/Cursos/cursoStanfordMachineLearning2018/wk3_Logistic_Regression/grad_logitR_codeR/gradDesc_logit_optim/regularization.yaml")
+scripts <- params$scripts_path
+
+# Reading the data
+inputVars <- params$inputVars
+y_idx <- params$respVar
+trainSet <- read.table(params$trainSet, header=TRUE, sep="\t");
+valSet <- read.table(params$valSet, header=TRUE, sep="\t");
+
+# Removing missing values from response variable (No missing values for features)
+trainSet <- trainSet[-which(is.na(trainSet[,y_idx])),]
+y    <- as.matrix(trainSet[,y_idx])
+X    <- as.matrix(trainSet[,inputVars])
+X <- cbind(rep(1,nrow(X)), X) # add a column of ones
+
+# Removing missing values from response variable (No missing values for features)
+valSet <- valSet[-which(is.na(valSet[,y_idx])),]
+yval <- as.matrix(valSet[,y_idx])
+Xval <- as.matrix(valSet[,inputVars])
+Xval <- cbind(rep(1,nrow(Xval)), Xval) # add a column of ones
+
+# Adding some labels
+val_lab(trainSet[,4:13])= num_lab("
+                        0 Non-Aberrant    
+                        1 Aberrant    
+                        ")
+
+val_lab(trainSet$ERpos)=num_lab("
+                        0 ER-    
+                        1 ER+    
+                        ")
+```
+
+```{r}
+table(trainSet$ERpos)
+```
+#### Frequencies for significant regions after TAaCGH (features):
+
+```{r}
+# Frequency table for features
+sapply(trainSet[,4:13],table)
+```
+### Validation data set: Climent
+
+It is common with genomic arrays that the platform or the laboratory might have an effect on the data so it is best not to mix them. I chose to keep the full Climent data set as validation set which consists of 161 samples. Features do not have any missing values but the response variable ER+ does. These are the frequencies after removing missing values
+
+``` {r include=FALSE}
+# Adding some labels
+val_lab(valSet[,4:13])= num_lab("
+                        0 Non-Aberrant    
+                        1 Aberrant    
+                        ")
+
+val_lab(valSet$ERpos)=num_lab("
+                        0 ER-    
+                        1 ER+    
+                        ")
+```
+#### Response variable: Over-expression of estrogen receptor (ER+)
+
+```{r}
+table(valSet$ERpos)
+```
+#### Frequencies for significant regions after TAaCGH (features):
+
+```{r}
+# Frequency table for features
+sapply(valSet[,4:13],table)
+```
+
+### Running gradient descent with regularized logistic regression
+
+#### Logistic regression hypothesis
+$h_\theta(x)=g(\theta^Tx)$ 
+
+where $g$ is the sigmoid function: $g(z)=\frac{1}{1+e^{-z}}$.
+
+#### The cost function
+$J(\theta)=\frac{1}{m}\sum_{i=1}^{m}{[-y^{(i)}log(h_{\theta}(x^{(i)})) - (1-y^{(i)})log(1-h_{\theta}(x^{(i)}))]}+\frac{\lambda}{2m}\sum_{j=1}^{n}{\theta^2}\\$.
+
+#### Gradient
+$\frac{\partial J(\theta)}{\partial\theta_j}=\frac{1}{m}\sum_{i=1}^{m}(h_\theta(x^{(i)})-y^{(i)})x_j^{(i)}$,
+
+where $m$ is the number of samples, $n$ the number of features and $y$ corresponds to the response variable.
+
+```{r include=FALSE}
+
+# importing the functions
+source(paste(scripts,"sigmoid.R", sep="/"))  # sigmoid function
+source(paste(scripts,"cost_reg_logit.R",sep="/")) #cost function for logistic regression
+source(paste(scripts,"predict.R", sep="/")) # prediction function
+source(paste(scripts,"score.R", sep="/")) # score for logistic regression: F1 or Accuracy
+source(paste(scripts,"grad_reg_logit.R",sep="/")) # gradients descent for one lambda
+source(paste(scripts,"grad_reg_logit_optim_iterLambda.R",sep="/")) # gradient descent for vector of lambda
+source(paste(scripts,"curveLambdaVSscore.R",sep="/")) # plots score (F1 or Accuracy) for every lambda
+source(paste(scripts,"plot_thetaVSlambda.R",sep="/")) #plot coefficients vs lambda
+source(paste(scripts,"learningCurve.R",sep="/")) #plot the learning curve for the final model
+```
+
+ 
+```{r include=FALSE}
+# Initialize theta and lambda
+initial_theta <- rep(0, (ncol(X)))
+lambda <- 0
+
+# Reading the metric to use from the yaml file
+metric <- params$metric
+```
+
+#### Cost and gradient for initial_theta equal to zero
+```{r}
+# Compute and display initial cost
+J <- cost_reg_logit(initial_theta, X, y, lambda);
+J %>% round(3) %>% paste('Cost at initial theta (zeros):') %>% print()
+```
+#### Gradient descent with no regularization (lambda=0)
+```{r}
+# Gradient descent with optim
+optimized_noReg <- optim(par=initial_theta,X=X,y=y,lambda=lambda, fn=cost_reg_logit,gr=grad_reg_logit)
+print("The optimized theta values with no regularization (lambda=0) are: ")
+theta <- optimized_noReg$par
+names(theta) <- c("Intercept", colnames(trainSet[,inputVars]))
+print(round(theta,3))
+
+print('The cost at the final theta values with no regularization (lambda=0) is: ')
+print(round(optimized_noReg$value,3))
+```
+#### Gradient descent with regularization
+
+##### Choosing the right penalty in the regularization (lambda)
+```{r}
+# Choosing lambda
+lambdas_to_try <- seq(0, 10, length.out = 100)
+optimObj <- grad_reg_logit_optim_iterLambda(initial_theta,  X, y, lambdas_to_try, metric="F1")
+thetaMat <- optimObj$thetaMat
+colnames(thetaMat) <- c("Intercept", colnames(trainSet[,inputVars]))
+
+scoreVal <- curveLambdaVSscore(thetaMat, X, y, Xval, yval, metric)
+ plot_thetaVSlambda(thetaMat, lambdas_to_try)
+ 
+ best.lambda.idx <- which.max(scoreVal)
+ best.lambda <- lambdas_to_try[best.lambda.idx]
+ final.scoreVal <- max(scoreVal)*100
+paste('The best', metric, 'score is:', round(final.scoreVal,1),'% at lambda=', round(best.lambda,3)) %>% print()
+
+paste('The optimized theta values for lambda=', round(best.lambda,3), 'are:')
+colnames(thetaMat) <- c("Intercept", colnames(trainSet[,inputVars]))
+thetaMat[best.lambda.idx,] %>% round(3) %>% print()
+```
+##### Learning curve: increasing number of samples
+```{r}
+curve <- learningCurve(initial_theta, best.lambda, X, y, Xval, yval, metric="F1")
+```
