@@ -3,7 +3,7 @@
 
 Copy Number Aberrations, gains and losses of genomic regions, are a hallmark of cancer. Copy number data is high-dimensional and is characterized by heavy correlated features. Often, like in this case, the number of samples is small compared to the number of features. In this work I first reduce the dimensionality using Topological Analysis of array CGH (TAaCGH) [1] detecting regions of the genome with significant aberrations in copy number for patients with over-expression in estrogen receptor (ER+). Next it is determined if each of the patients is aberrant for those particular regions creating, as a result, a set of binary variables that will be used as features in a gradient descent logistic regression model to predict ER+ breast cancer [2].
 
-The file regularized_optim_logit_ERpos.html shows the results and describes each step that leads to the final model with F1 score of 71.4% for ER+ breast cancer.
+The file regularized_optim_logit_ERpos.pdf shows the results and describes each step that leads to the final model with F1 score of 71.4% for ER+ breast cancer.
 
 ### References
 
